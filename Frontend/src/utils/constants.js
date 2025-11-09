@@ -3,8 +3,9 @@
 // 🔹 Base URL for your backend API
 // Use environment variable if deployed, fallback to your Render backend
 export const API_BASE =
-  import.meta.env.VITE_API_BASE?.replace(/\/$/, "") || "http://localhost:5000/api";
+  import.meta.env.VITE_API_BASE?.replace(/\/$/, "") || "https://cloud-k.onrender.com";
 
+  
 // 🔹 Centralized API endpoints
 export const API_ENDPOINTS = {
   auth: {

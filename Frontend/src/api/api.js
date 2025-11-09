@@ -4,7 +4,7 @@ import { API_BASE } from "../utils/constants.js";
 
 // ✅ Ensure your baseURL points to the correct Render API root
 const api = axios.create({
-  baseURL: API_BASE || "http://localhost:5000/api", 
+  baseURL: API_BASE || "https://cloud-k.onrender.com", 
 });
 
 // 🔹 Automatically attach JWT token to every request
