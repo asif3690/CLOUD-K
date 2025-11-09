@@ -2,9 +2,9 @@
 import axios from "axios";
 import { API_BASE } from "../utils/constants.js";
 
-// ✅ Ensure your baseURL points to the correct Render API root
+// ✅ Correct base URL points to /api root of backend
 const api = axios.create({
-  baseURL: API_BASE || "https://cloud-k.onrender.com", 
+  baseURL: API_BASE || "https://cloud-k.onrender.com/api",
 });
 
 // 🔹 Automatically attach JWT token to every request
@@ -16,15 +16,4 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-
 export default api;
-
-
-
-
-
-
-
-
-
-
