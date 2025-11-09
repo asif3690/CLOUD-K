@@ -7,6 +7,7 @@ const { JWT_SECRET } = require("../middleware/auth");
 
 const router = express.Router();
 
+
 // POST /api/auth/login
 router.post("/login", async (req, res) => {
   const { username, password } = req.body || {};
