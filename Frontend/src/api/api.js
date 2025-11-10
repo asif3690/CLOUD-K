@@ -1,9 +1,8 @@
 import axios from "axios";
 import { API_BASE } from "../utils/constants.js";
 
-// ❌ This will break — because baseURL doesn't include `/api`
 const api = axios.create({
-  baseURL: API_BASE || "https://cloud-k.onrender.com/api",
+  baseURL: API_BASE,
 });
 
 api.interceptors.request.use((config) => {
