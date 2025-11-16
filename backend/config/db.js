@@ -1,18 +1,14 @@
-// backend/config/db.js
 const oracledb = require("oracledb");
 require("dotenv").config();
 
-// Always return query results as objects (not arrays)
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 
-// ✅ Database configuration from environment variables
 const dbConfig = {
-  user: process.env.ORACLE_USER || "cloudkitchen",       // your schema user
+  user: process.env.ORACLE_USER || "cloudkitchen",
   password: process.env.ORACLE_PASSWORD || "asif123",
-  connectString: process.env.ORACLE_CONNECT_STRING || "localhost/cloudpdb", // your service name
+  connectString: process.env.ORACLE_CONNECT_STRING || "localhost/orclpdb",
 };
 
-// ✅ Connection Pool Configuration
 const poolConfig = {
   user: dbConfig.user,
   password: dbConfig.password,
@@ -23,45 +19,32 @@ const poolConfig = {
   poolTimeout: 60,
 };
 
-let pool;
+let pool = null;
 
-// ✅ Initialize Oracle connection pool
 async function initialize() {
   try {
-    console.log("🔄 Initializing Oracle connection pool...");
+    console.log("Creating Oracle DB pool...");
     pool = await oracledb.createPool(poolConfig);
-    console.log("✅ Oracle connection pool created successfully");
-    console.log(`📊 Connected to: ${dbConfig.connectString}`);
+    console.log("Oracle pool created.");
   } catch (err) {
-    console.error("❌ Error creating connection pool:", err);
+    console.error("DB Pool Error:", err.message);
     throw err;
   }
 }
 
-// ✅ Get connection from pool
 async function getConnection() {
-  try {
-    if (!pool) {
-      throw new Error("Connection pool not initialized. Call initialize() first.");
-    }
-    const connection = await pool.getConnection();
-    console.log("🔗 Database connection acquired");
-    return connection;
-  } catch (err) {
-    console.error("🚨 Error getting connection from pool:", err);
-    throw err;
-  }
+  if (!pool) throw new Error("Pool not initialized. Call initialize() first.");
+  return await pool.getConnection();
 }
 
-// ✅ Close the pool gracefully
 async function close() {
   try {
     if (pool) {
-      await pool.close(10);
-      console.log("🔒 Connection pool closed");
+      await pool.close(5);
+      console.log("Oracle pool closed.");
     }
   } catch (err) {
-    console.error("Error closing connection pool:", err);
+    console.error("Pool close error:", err.message);
   }
 }
 

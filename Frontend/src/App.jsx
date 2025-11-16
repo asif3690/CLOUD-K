@@ -1,47 +1,92 @@
 // src/App.jsx
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+
+import { AuthProvider, useAuth } from "./Context/AuthContext.jsx";
+
+import Navbar from "./Components/Navbar.jsx";
 import Login from "./Pages/Login.jsx";
 import Dashboard from "./Pages/Dashboard.jsx";
 import Menu from "./Pages/Menu.jsx";
 import Orders from "./Pages/Orders.jsx";
-import Layout from "./Components/Layout.jsx";
-import { useAuth } from "./Context/AuthContext.jsx";
+import RiderDashboard from "./Pages/RiderDashboard.jsx";
 
-function ProtectedRoute({ children }) {
-  const auth = useAuth();
+function ProtectedRoute({ children, roles }) {
+  const { user } = useAuth();
 
-  if (!auth) {
-    return <Navigate to="/login" replace />;
-  }
+  // Not logged in → go to login
+  if (!user) return <Navigate to="/login" />;
 
-  const { user } = auth;
-  return user ? children : <Navigate to="/login" replace />;
+  // User logged in but role not allowed
+  if (roles && !roles.includes(user.role)) return <Navigate to="/" />;
+
+  return children;
 }
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Public Route */}
-        <Route path="/login" element={<Login />} />
+    <AuthProvider>
+      <Router>
 
-        {/* Protected Layout */}
-        <Route
-          element={
-            <ProtectedRoute>
-              <Layout />
-            </ProtectedRoute>
-          }
-        >
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/menu" element={<Menu />} />
-          <Route path="/orders" element={<Orders />} />
-        </Route>
+        {/* Navbar only for logged-in users */}
+        <NavbarWrapper />
 
-        {/* Redirect unknown routes */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+        <Routes>
+
+          {/* LOGIN */}
+          <Route path="/login" element={<Login />} />
+
+          {/* DASHBOARD (Home Page) */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute roles={["admin", "chef", "customer"]}>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* MENU PAGE */}
+          <Route
+            path="/menu"
+            element={
+              <ProtectedRoute roles={["admin", "chef", "customer"]}>
+                <Menu />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ORDERS PAGE */}
+          <Route
+            path="/orders"
+            element={
+              <ProtectedRoute roles={["admin", "chef", "customer", "rider"]}>
+                <Orders />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* RIDER DASHBOARD */}
+          <Route
+            path="/rider"
+            element={
+              <ProtectedRoute roles={["rider"]}>
+                <RiderDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* FALLBACK */}
+          <Route path="*" element={<Navigate to="/" />} />
+
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
+}
+
+/* Navbar visible only after login */
+function NavbarWrapper() {
+  const { user } = useAuth();
+  return user ? <Navbar /> : null;
 }

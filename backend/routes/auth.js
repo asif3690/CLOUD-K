@@ -2,134 +2,137 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const { body, validationResult } = require("express-validator");
+const rateLimit = require("express-rate-limit");
 const { getConnection } = require("../config/db");
-
+const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 require("dotenv").config();
-const JWT_SECRET = process.env.JWT_SECRET;
+
+const JWT_SECRET = process.env.JWT_SECRET || "super_secret";
+const TOKEN_EXPIRY = process.env.TOKEN_EXPIRY || "8h";
+const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS) || 10;
 
 const router = express.Router();
 
 // =======================
-// POST /api/auth/login
+// Rate Limiter
 // =======================
-router.post("/login", async (req, res) => {
-  const { username, password } = req.body || {};
-
-  if (!username || !password) {
-    return res.status(400).json({ error: "Username and password are required" });
-  }
-
-  let conn;
-  try {
-    conn = await getConnection();
-
-    // Query user from database
-    const result = await conn.execute(
-      `SELECT USER_ID, USERNAME, PASSWORD, ROLE, EMAIL 
-       FROM USERS 
-       WHERE USERNAME = :username`,
-      [username]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-
-    const user = result.rows[0];
-
-    // Compare password
-    let isPasswordValid;
-    if (user.PASSWORD.startsWith("$2a$") || user.PASSWORD.startsWith("$2b$")) {
-      isPasswordValid = await bcrypt.compare(password, user.PASSWORD);
-    } else {
-      isPasswordValid = password === user.PASSWORD;
-    }
-
-    if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        userId: user.USER_ID,
-        username: user.USERNAME,
-        role: user.ROLE,
-      },
-      JWT_SECRET,
-      { expiresIn: "8h" }
-    );
-
-    res.json({
-      message: "Login successful",
-      token,
-      expiresIn: "8h",
-      user: { username: user.USERNAME, role: user.ROLE },
-    });
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ error: "Login failed" });
-  } finally {
-    if (conn) await conn.close();
-  }
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: "Too many attempts. Try again later.",
 });
 
-// =======================
-// POST /api/auth/register
-// =======================
-router.post("/register", async (req, res) => {
-  const { username, password, email, role } = req.body || {};
+// Normalize Oracle rows
+function normalizeUser(row) {
+  if (!row) return null;
+  if (!Array.isArray(row)) return row;
 
-  if (!username || !password) {
-    return res.status(400).json({ error: "Username and password are required" });
-  }
+  return {
+    USER_ID: row[0],
+    USERNAME: row[1],
+    PASSWORD: row[2],
+    ROLE: row[3],
+    EMAIL: row[4],
+  };
+}
 
-  let conn;
-  try {
-    conn = await getConnection();
+/* ======================================================
+   LOGIN
+====================================================== */
+router.post(
+  "/login",
+  authLimiter,
+  [body("username").notEmpty(), body("password").notEmpty()],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ errors: errors.array() });
 
-    // Check if username already exists
-    const checkResult = await conn.execute(
-      `SELECT USERNAME FROM USERS WHERE USERNAME = :username`,
-      [username]
-    );
+    const { username, password } = req.body;
+    let conn;
 
-    if (checkResult.rows.length > 0) {
-      return res.status(409).json({ error: "Username already exists" });
+    try {
+      conn = await getConnection();
+
+      const result = await conn.execute(
+        `SELECT USER_ID, USERNAME, PASSWORD, ROLE, EMAIL 
+         FROM USERS WHERE USERNAME = :username`,
+        [username]
+      );
+
+      if (!result.rows.length)
+        return res.status(401).json({ error: "Invalid credentials" });
+
+      const user = normalizeUser(result.rows[0]);
+
+      // Password check
+      let valid = false;
+      if (user.PASSWORD.startsWith("$2")) {
+        valid = await bcrypt.compare(password, user.PASSWORD);
+      } else {
+        valid = password === user.PASSWORD;
+      }
+
+      if (!valid)
+        return res.status(401).json({ error: "Invalid credentials" });
+
+      // JWT Token
+      const token = jwt.sign(
+        {
+          userId: user.USER_ID,
+          username: user.USERNAME,
+          role: user.ROLE,
+        },
+        JWT_SECRET,
+        { expiresIn: TOKEN_EXPIRY }
+      );
+
+      res.json({
+        message: "Login successful",
+        token,
+        user: {
+          username: user.USERNAME,
+          role: user.ROLE,
+          email: user.EMAIL,
+        },
+      });
+    } catch (err) {
+      console.error("Login error:", err);
+      res.status(500).json({ error: "Login failed" });
+    } finally {
+      if (conn) try { await conn.close(); } catch {}
     }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Insert new user
-    await conn.execute(
-      `INSERT INTO USERS (USER_ID, USERNAME, PASSWORD, EMAIL, ROLE) 
-       VALUES (user_seq.NEXTVAL, :username, :password, :email, :role)`,
-      [username, hashedPassword, email || null, role || "customer"],
-      { autoCommit: true }
-    );
-
-    res.status(201).json({
-      message: "Registration successful",
-      user: {
-        username,
-        role: role || "customer",
-        email,
-      },
-    });
-  } catch (err) {
-    console.error("Registration error:", err);
-    res.status(500).json({ error: "Registration failed" });
-  } finally {
-    if (conn) await conn.close();
   }
-});
+);
 
-// =======================
-// POST /api/auth/logout
-// =======================
-router.post("/logout", (req, res) => {
-  res.json({ message: "Logout successful" });
-});
+/* ======================================================
+   GET ALL RIDERS (Admin / Chef)
+====================================================== */
+router.get(
+  "/riders",
+  authenticateToken,
+  authorizeRoles("admin", "chef"),
+  async (req, res) => {
+    let conn;
+    try {
+      conn = await getConnection();
+
+      const result = await conn.execute(
+        `SELECT USER_ID, USERNAME, EMAIL, ROLE
+         FROM USERS
+         WHERE LOWER(ROLE) = 'rider'
+         ORDER BY USERNAME`
+      );
+
+      res.json(result.rows);
+    } catch (err) {
+      console.error("Fetch riders error:", err);
+      res.status(500).json({ error: "Failed to load riders" });
+    } finally {
+      if (conn) try { await conn.close(); } catch {}
+    }
+  }
+);
 
 module.exports = router;

@@ -1,89 +1,84 @@
 // backend/routes/menu.js
 const express = require("express");
+const oracledb = require("oracledb");
 const { getConnection } = require("../config/db");
-const { mapResult } = require("../utils/oracleHelper");
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 
 const router = express.Router();
 
-// GET /api/menu - Get all menu items (authenticated users)
+/* ======================================================
+   GET ALL MENU ITEMS
+====================================================== */
 router.get("/", authenticateToken, async (req, res) => {
   let conn;
   try {
     conn = await getConnection();
+    conn.outputFormat = oracledb.OUT_FORMAT_OBJECT;
+
     const result = await conn.execute(
-      `SELECT ITEM_ID, NAME, DESCRIPTION, PRICE, AVAILABLE, CATEGORY, 
-              CREATED_AT, UPDATED_AT 
-       FROM MENU_ITEMS 
-       ORDER BY CATEGORY, NAME`
+      `SELECT ITEM_ID, NAME, DESCRIPTION, PRICE, AVAILABLE, CATEGORY,
+              CREATED_AT, UPDATED_AT
+       FROM MENU_ITEMS
+       ORDER BY ITEM_ID`
     );
-    res.json(mapResult(result));
+
+    const data = result.rows.map((item) => ({
+      ...item,
+      AVAILABLE: item.AVAILABLE === 1
+    }));
+
+    res.json(data);
+
   } catch (err) {
     console.error("GET /menu error:", err);
-    res.status(500).json({ error: "Failed to fetch menu items" });
+    res.status(500).json({ error: "Failed to load menu items" });
   } finally {
     if (conn) await conn.close();
   }
 });
 
-// GET /api/menu/:id - Get single menu item
-router.get("/:id", authenticateToken, async (req, res) => {
-  let conn;
-  try {
-    conn = await getConnection();
-    const result = await conn.execute(
-      `SELECT ITEM_ID, NAME, DESCRIPTION, PRICE, AVAILABLE, CATEGORY, 
-              CREATED_AT, UPDATED_AT 
-       FROM MENU_ITEMS 
-       WHERE ITEM_ID = :id`,
-      [req.params.id]
-    );
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Menu item not found" });
-    }
-    
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("GET /menu/:id error:", err);
-    res.status(500).json({ error: "Failed to fetch menu item" });
-  } finally {
-    if (conn) await conn.close();
-  }
-});
-
-// POST /api/menu - Add new menu item (admin or chef only)
+/* ======================================================
+   ADD MENU ITEM
+====================================================== */
 router.post(
   "/",
   authenticateToken,
   authorizeRoles("admin", "chef"),
   async (req, res) => {
-    const { NAME, DESCRIPTION, PRICE, AVAILABLE, CATEGORY } = req.body || {};
-    
-    if (!NAME || PRICE === undefined) {
+    const body = req.body;
+
+    const NAME = body.NAME;
+    const DESCRIPTION = body.DESCRIPTION || null;
+    const PRICE = Number(body.PRICE);
+    const AVAILABLE = body.AVAILABLE ? 1 : 0;
+    const CATEGORY = body.CATEGORY || null;
+
+    if (!NAME || isNaN(PRICE))
       return res.status(400).json({ error: "Name and Price are required" });
-    }
 
     let conn;
     try {
       conn = await getConnection();
-      
+
       await conn.execute(
-        `INSERT INTO MENU_ITEMS (ITEM_ID, NAME, DESCRIPTION, PRICE, AVAILABLE, CATEGORY)
-         VALUES (menu_seq.NEXTVAL, :name, :description, :price, :available, :category)`,
+        `INSERT INTO MENU_ITEMS
+         (ITEM_ID, NAME, DESCRIPTION, PRICE, AVAILABLE, CATEGORY, CREATED_AT)
+         VALUES
+         (MENU_SEQ.NEXTVAL, :name, :description, :price, :available, :category, SYSTIMESTAMP)`,
         {
           name: NAME,
-          description: DESCRIPTION || "",
-          price: Number(PRICE),
-          available: AVAILABLE ? 1 : 0,
-          category: CATEGORY || null
+          description: DESCRIPTION,
+          price: PRICE,
+          available: AVAILABLE,
+          category: CATEGORY
         },
         { autoCommit: true }
       );
-      
-      res.status(201).json({ message: "Menu item added successfully" });
+
+      res.json({ message: "Item added successfully" });
+
     } catch (err) {
-      console.error("POST /menu error:", err);
+      console.error("POST /menu error:", err.message);
       res.status(500).json({ error: "Failed to add menu item" });
     } finally {
       if (conn) await conn.close();
@@ -91,45 +86,53 @@ router.post(
   }
 );
 
-// PUT /api/menu/:id - Update menu item (admin or chef only)
+/* ======================================================
+   UPDATE MENU ITEM
+====================================================== */
 router.put(
   "/:id",
   authenticateToken,
   authorizeRoles("admin", "chef"),
   async (req, res) => {
-    const { NAME, DESCRIPTION, PRICE, AVAILABLE, CATEGORY } = req.body || {};
-    
+    const body = req.body;
+
+    const NAME = body.NAME;
+    const DESCRIPTION = body.DESCRIPTION || null;
+    const PRICE = Number(body.PRICE);
+    const AVAILABLE = body.AVAILABLE ? 1 : 0;
+    const CATEGORY = body.CATEGORY || null;
+
     let conn;
     try {
       conn = await getConnection();
-      
+
       const result = await conn.execute(
-        `UPDATE MENU_ITEMS 
-         SET NAME = :name, 
-             DESCRIPTION = :description, 
-             PRICE = :price, 
+        `UPDATE MENU_ITEMS
+         SET NAME = :name,
+             DESCRIPTION = :description,
+             PRICE = :price,
              AVAILABLE = :available,
              CATEGORY = :category,
-             UPDATED_AT = CURRENT_TIMESTAMP
+             UPDATED_AT = SYSTIMESTAMP
          WHERE ITEM_ID = :id`,
         {
+          id: req.params.id,
           name: NAME,
-          description: DESCRIPTION || "",
-          price: Number(PRICE),
-          available: AVAILABLE ? 1 : 0,
-          category: CATEGORY || null,
-          id: req.params.id
+          description: DESCRIPTION,
+          price: PRICE,
+          available: AVAILABLE,
+          category: CATEGORY
         },
         { autoCommit: true }
       );
-      
-      if (result.rowsAffected === 0) {
-        return res.status(404).json({ error: "Menu item not found" });
-      }
-      
-      res.json({ message: "Menu item updated successfully" });
+
+      if (result.rowsAffected === 0)
+        return res.status(404).json({ error: "Item not found" });
+
+      res.json({ message: "Item updated successfully" });
+
     } catch (err) {
-      console.error("PUT /menu/:id error:", err);
+      console.error("PUT /menu error:", err.message);
       res.status(500).json({ error: "Failed to update menu item" });
     } finally {
       if (conn) await conn.close();
@@ -137,30 +140,32 @@ router.put(
   }
 );
 
-// DELETE /api/menu/:id - Delete menu item (admin only)
+/* ======================================================
+   DELETE MENU ITEM
+====================================================== */
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRoles("admin"),
+  authorizeRoles("admin", "chef"),
   async (req, res) => {
     let conn;
     try {
       conn = await getConnection();
-      
+
       const result = await conn.execute(
         `DELETE FROM MENU_ITEMS WHERE ITEM_ID = :id`,
-        [req.params.id],
+        { id: req.params.id },
         { autoCommit: true }
       );
-      
-      if (result.rowsAffected === 0) {
-        return res.status(404).json({ error: "Menu item not found" });
-      }
-      
-      res.json({ message: "Menu item deleted successfully" });
+
+      if (result.rowsAffected === 0)
+        return res.status(404).json({ error: "Item not found" });
+
+      res.json({ message: "Item deleted successfully" });
+
     } catch (err) {
-      console.error("DELETE /menu/:id error:", err);
-      res.status(500).json({ error: "Failed to delete menu item" });
+      console.error("DELETE /menu error:", err.message);
+      res.status(500).json({ error: "Failed to delete item" });
     } finally {
       if (conn) await conn.close();
     }

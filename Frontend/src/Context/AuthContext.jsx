@@ -1,24 +1,27 @@
-import React, { createContext, useContext, useState } from "react";
+// src/Context/AuthContext.jsx
+import React, { createContext, useContext, useEffect, useState } from "react";
 import api from "../api/api";
 import { API_ENDPOINTS } from "../utils/constants";
 
-const AuthContext = createContext(null);
-export const useAuth = () => useContext(AuthContext);
+const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(
-    JSON.parse(localStorage.getItem("user")) || null
-  );
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem("user");
+    return saved ? JSON.parse(saved) : null;
+  });
 
   const login = async (username, password) => {
     try {
-      const res = await api.post(API_ENDPOINTS.login, { username, password });
-      localStorage.setItem("token", res.data.token);
-      localStorage.setItem("user", JSON.stringify(res.data.user));
-      setUser(res.data.user);
+      const { data } = await api.post(API_ENDPOINTS.login, { username, password });
+
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+      setUser(data.user);
+
       return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err?.response?.data?.error || "Login failed" };
+    } catch (error) {
+      return { ok: false, error: "Invalid username or password" };
     }
   };
 
@@ -34,3 +37,5 @@ export function AuthProvider({ children }) {
     </AuthContext.Provider>
   );
 }
+
+export const useAuth = () => useContext(AuthContext);
